@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8
+    container_name: mysql-db
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+    ports:
+      - "3306:3306"
+    networks:
+      - backend
+    volumes:
+      - mysql_data:/var/lib/mysql
+    restart: unless-stopped
+
+  spring-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: spring-api
+    depends_on:
+      - mysql
+    networks:
+      - backend
+    ports:
+      - "8081:8080" # Port hôte 8081 mappé au port conteneur 8080 (exposé dans Dockerfile)
+    env_file:
+      - .env # Charge les variables d'environnement depuis le fichier .env
+    environment:
+      # Les variables suivantes sont chargées depuis .env, mais peuvent être listées ici pour plus de clarté
+      # ou pour surcharger des valeurs spécifiques si nécessaire.
+      # SPRING_APPLICATION_NAME: ${SPRING_APPLICATION_NAME}
+      # SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL} # Déjà configuré dans .env pour pointer vers mysql-db
+      # SPRING_DATASOURCE_USERNAME: ${SPRING_DATASOURCE_USERNAME}
+      # SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD}
+      # SPRING_DATASOURCE_DRIVER_CLASS_NAME: ${SPRING_DATASOURCE_DRIVER_CLASS_NAME}
+      # SPRING_JPA_DATABASE_PLATFORM: ${SPRING_JPA_DATABASE_PLATFORM}
+      # SPRING_JPA_HIBERNATE_DDL_AUTO: ${SPRING_JPA_HIBERNATE_DDL_AUTO}
+      # JWT_SECRET: ${JWT_SECRET}
+      # JWT_EXPIRATION: ${JWT_EXPIRATION}
+      # SPRING_BOOT_APP_PORT: ${SPRING_BOOT_APP_PORT} # Le port interne est géré par Spring Boot et exposé dans le Dockerfile
+      # Le script wait-for-it.sh est géré dans le Dockerfile et attend mysql-db:3306
+      WAIT_FOR_HOST: mysql-db # Utilisé par wait-for-it.sh dans le Dockerfile (si non défini dans l'ENTRYPOINT)
+      WAIT_FOR_PORT: 3306     # Utilisé par wait-for-it.sh dans le Dockerfile (si non défini dans l'ENTRYPOINT)
+    restart: unless-stopped
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  mysql_data:
+

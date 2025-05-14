@@ -1,0 +1,89 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v2
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'maven'
+
+      - name: Build app with Maven
+        run: mvn clean package -DskipTests
+
+      # Note: Setting secrets directly into GITHUB_ENV is generally not recommended for sensitive data.
+      # It's better to use secrets directly in the steps where they are needed.
+      # However, following user's provided structure.
+      - name: Set up environment variables for Docker Compose (if needed locally in runner)
+        run: |
+          echo "MYSQL_ROOT_PASSWORD=${{secrets.MYSQL_ROOT_PASSWORD}}" >> $GITHUB_ENV
+          echo "SPRING_DATASOURCE_PASSWORD=${{secrets.SPRING_DATASOURCE_PASSWORD}}" >> $GITHUB_ENV
+        env:
+          MYSQL_ROOT_PASSWORD: ${{secrets.MYSQL_ROOT_PASSWORD}} # This secret needs to be configured in GitHub repository settings
+          SPRING_DATASOURCE_PASSWORD: ${{secrets.SPRING_DATASOURCE_PASSWORD}} # This secret needs to be configured in GitHub repository settings
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }} # This secret needs to be configured in GitHub repository settings
+          password: ${{ secrets.DOCKER_PASSWORD }} # This secret needs to be configured in GitHub repository settings
+
+      - name: Build Docker image
+        run: docker build -t ${{ secrets.DOCKER_REPO }}:${{ github.sha }} -t ${{ secrets.DOCKER_REPO }}:latest .
+        # Using github.sha for a unique tag per commit, and also tagging as latest.
+        # DOCKER_REPO should be like 'yourusername/yourimagename'
+
+      - name: Push Docker image to Docker Hub
+        run: |
+          docker push ${{ secrets.DOCKER_REPO }}:${{ github.sha }}
+          docker push ${{ secrets.DOCKER_REPO }}:latest
+
+      # The following steps to run docker-compose up/down are unusual in a CI pipeline that builds and pushes an image.
+      # Typically, deployment is a separate job or handled by another system after the image is pushed.
+      # Including them as per user's request, but they will run on the GitHub Actions runner itself.
+      - name: Start Docker Compose (for testing or specific CI runner setup)
+        run: docker-compose -f docker-compose.yml up -d
+        env:
+          # These env vars are for docker-compose to pick up if it references them directly,
+          # or for the .env file if it's designed to use them.
+          # The .env file created earlier already sets these for the spring-api service.
+          MYSQL_ROOT_PASSWORD: ${{secrets.MYSQL_ROOT_PASSWORD}}
+          MYSQL_DATABASE: gestionproject # As defined in .env, or could be a secret
+          SPRING_APPLICATION_NAME: GestionStockProjectF # As defined in .env
+          SPRING_DATASOURCE_URL: jdbc:mysql://mysql-db:3306/gestionproject?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true # As defined in .env
+          SPRING_DATASOURCE_USERNAME: root # As defined in .env
+          SPRING_DATASOURCE_PASSWORD: ${{secrets.SPRING_DATASOURCE_PASSWORD}}
+          SPRING_DATASOURCE_DRIVER_CLASS_NAME: com.mysql.cj.jdbc.Driver # As defined in .env
+          SPRING_JPA_DATABASE_PLATFORM: org.hibernate.dialect.MySQL8Dialect # As defined in .env
+          SPRING_JPA_HIBERNATE_DDL_AUTO: update # As defined in .env
+          JWT_SECRET: ${{secrets.JWT_SECRET}} # This secret needs to be configured in GitHub repository settings
+          JWT_EXPIRATION: 86400000 # As defined in .env
+
+      - name: Wait for services to be up (optional, for testing)
+        run: sleep 30 # Give services time to start
+
+      # Add any tests here that you might want to run against the running containers
+      # For example: curl http://localhost:8081/actuator/health
+
+      - name: Shut down Docker Compose (cleanup CI runner)
+        if: always() # Ensure this runs even if previous steps fail
+        run: docker-compose -f docker-compose.yml down
+
